@@ -1,0 +1,31 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# jupyter
+.ipynb_checkpoints/
+
+# data: keep the folders, ignore the contents
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# results: keep folder, ignore generated artifacts
+results/*
+!results/.gitkeep
+
+# models
+*.pkl
+*.joblib
+*.pt
+*.pth
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/

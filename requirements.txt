@@ -1,0 +1,25 @@
+# core
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+
+# cheminformatics
+rdkit>=2023.9.1
+
+# classical ML
+scikit-learn>=1.4
+xgboost>=2.0
+
+# plotting
+matplotlib>=3.8
+seaborn>=0.13
+
+# data pull
+requests>=2.31
+tqdm>=4.66
+
+# notebooks
+jupyter>=1.0
+ipykernel>=6.29
+
+# NOTE: torch + torch_geometric are added in Phase 10.
