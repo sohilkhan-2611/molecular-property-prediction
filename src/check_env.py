@@ -6,8 +6,22 @@ Run:  python src/check_env.py
 import sys
 
 
+def _first_meaningful_line(exc):
+    """Some libraries raise multi-line errors. Grab the first useful line."""
+    for line in str(exc).splitlines():
+        line = line.strip()
+        if line:
+            return line[:110]
+    return type(exc).__name__
+
+
 def check_imports():
-    """Import every library the project needs and print its version."""
+    """Import every library the project needs and report its version.
+
+    Catches Exception, not just ImportError: some libraries import fine but
+    fail at load time on a missing system library (xgboost needs libomp on
+    macOS). We want that reported as a row, not as a traceback.
+    """
     results = {}
     libs = [
         ("numpy", "numpy"),
@@ -21,15 +35,17 @@ def check_imports():
     for module_name, display_name in libs:
         try:
             mod = __import__(module_name)
-            version = getattr(mod, "__version__", "unknown")
-            results[display_name] = version
+            results[display_name] = getattr(mod, "__version__", "unknown")
         except ImportError as exc:
-            results[display_name] = f"MISSING ({exc})"
+            results[display_name] = f"MISSING ({_first_meaningful_line(exc)})"
+        except Exception as exc:
+            results[display_name] = (
+                f"MISSING [{type(exc).__name__}] {_first_meaningful_line(exc)}"
+            )
     return results
 
 
 def check_rdkit():
-    """Parse a few SMILES and compute basic properties."""
     from rdkit import Chem
     from rdkit.Chem import Crippen, Descriptors
 
@@ -45,24 +61,16 @@ def check_rdkit():
         if mol is None:
             rows.append((name, smiles, None, None, None))
             continue
-        rows.append(
-            (
-                name,
-                smiles,
-                mol.GetNumAtoms(),                 # heavy atoms only, H is implicit
-                round(Descriptors.MolWt(mol), 2),  # molecular weight, g/mol
-                round(Crippen.MolLogP(mol), 4),    # RDKit's own computed logP
-            )
-        )
+        rows.append((name, smiles, mol.GetNumAtoms(),
+                     round(Descriptors.MolWt(mol), 2),
+                     round(Crippen.MolLogP(mol), 4)))
     return rows
 
 
 def check_bad_smiles():
-    """RDKit should return None for garbage, not crash."""
     from rdkit import Chem
     from rdkit import RDLogger
-
-    RDLogger.DisableLog("rdApp.*")  # silence the expected parse warnings
+    RDLogger.DisableLog("rdApp.*")
     bad = Chem.MolFromSmiles("this-is-not-a-molecule")
     RDLogger.EnableLog("rdApp.*")
     return bad is None
@@ -78,17 +86,18 @@ def main():
 
     print("LIBRARIES")
     versions = check_imports()
-    missing = []
+    broken = []
     for name, version in versions.items():
-        flag = "ok " if not version.startswith("MISSING") else "FAIL"
-        print(f"  [{flag}] {name:<16} {version}")
-        if version.startswith("MISSING"):
-            missing.append(name)
+        ok = not version.startswith("MISSING")
+        print(f"  [{'ok ' if ok else 'FAIL'}] {name:<16} {version}")
+        if not ok:
+            broken.append(name)
 
-    if missing:
+    if broken:
         print("-" * 62)
-        print(f"STOP: missing libraries -> {', '.join(missing)}")
-        print("Run: pip install -r requirements.txt")
+        print(f"STOP: these libraries did not load -> {', '.join(broken)}")
+        print("  not installed      -> pip install -r requirements.txt")
+        print("  xgboost + libomp   -> brew install libomp   (macOS only)")
         sys.exit(1)
 
     print("-" * 62)
