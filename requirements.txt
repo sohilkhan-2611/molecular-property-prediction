@@ -22,4 +22,6 @@ tqdm>=4.66
 jupyter>=1.0
 ipykernel>=6.29
 
-# NOTE: torch + torch_geometric are added in Phase 10.
+# graph neural networks (Phase 10 onward)
+torch>=2.2
+torch_geometric>=2.5
