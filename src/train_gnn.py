@@ -120,7 +120,9 @@ def train_one(make_model, graphs, y, fit_idx, val_idx, test_idx, args, seed, ver
     model.load_state_dict(best["state"])
     pred = predict(model, test_loader, y_mean, y_std) if len(test_idx) else None
     info = {"best_epoch": best["epoch"], "val_MAE": best["val"], "epochs_run": epoch,
-            "seconds": time.time() - t0, "history": history}
+            "seconds": time.time() - t0, "history": history,
+            # kept so train_final.py can save the trained network (main() ignores these)
+            "state": best["state"], "y_mean": y_mean, "y_std": y_std}
     return pred, info
 
 

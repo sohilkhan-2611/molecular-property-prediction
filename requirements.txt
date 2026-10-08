@@ -25,3 +25,6 @@ ipykernel>=6.29
 # graph neural networks (Phase 10 onward)
 torch>=2.2
 torch_geometric>=2.5
+
+# web demo (Phase 15)
+streamlit>=1.35
