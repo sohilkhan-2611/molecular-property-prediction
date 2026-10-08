@@ -1,6 +1,8 @@
 """Phase 11 (and 12): train a graph neural network on the molecular graphs.
 
-Run:  python src/train_gnn.py                    GCN, 3 seeds, both splits (about 15 to 25 min on a laptop CPU)
+Run:  python src/train_gnn.py                    GCN, 3 seeds, both splits (Phase 11)
+      python src/train_gnn.py --model mpnn       MPNN with bond features (Phase 12)
+      python src/train_gnn.py --model mpnn_nobond   the same MPNN with bond features switched off (ablation)
       python src/train_gnn.py --quick            1 seed, 15 epochs, to check the plumbing (about 1 min)
       python src/train_gnn.py --model gcn --seeds 5
 
@@ -32,8 +34,9 @@ from sklearn.model_selection import GroupShuffleSplit, ShuffleSplit
 from torch import nn
 from torch_geometric.loader import DataLoader
 
-from graph_data import NODE_DIM, load_graphs
+from graph_data import EDGE_DIM, NODE_DIM, load_graphs
 from models.gcn import GCN
+from models.mpnn import MPNN
 from splits import SEED, get_splits, murcko_scaffold, self_checks
 from train_rf import scores
 
@@ -44,7 +47,13 @@ XGB_CSV = ROOT / "results" / "phase8_xgb_results.csv"
 
 MODELS = {
     "gcn": lambda a: GCN(NODE_DIM, hidden=a.hidden, layers=a.layers, dropout=a.dropout),
+    "mpnn": lambda a: MPNN(NODE_DIM, EDGE_DIM, hidden=a.hidden, steps=a.layers, dropout=a.dropout),
+    # same MPNN, bond features zeroed out: tells you what the bond information is actually worth
+    "mpnn_nobond": lambda a: MPNN(NODE_DIM, EDGE_DIM, hidden=a.hidden, steps=a.layers, dropout=a.dropout,
+                                  use_bond_features=False),
 }
+# which earlier GNN a new one is compared against in the "is the difference real?" check
+REFERENCE = {"mpnn": "gcn", "mpnn_nobond": "mpnn"}
 
 
 def set_seed(seed):
@@ -210,6 +219,29 @@ def main():
     report(results, args, time.time() - t_start)
 
 
+def compare_to_reference(model, ref, n_boot=2000):
+    """Is the seed-averaged MAE of `model` really different from `ref`? Resample the test molecules."""
+    a_path = ROOT / "results" / f"gnn_{model}_predictions.csv"
+    b_path = ROOT / "results" / f"gnn_{ref}_predictions.csv"
+    if not (a_path.exists() and b_path.exists()):
+        return
+    a, b = pd.read_csv(a_path), pd.read_csv(b_path)
+    print(f"\nIS THE DIFFERENCE REAL?  {model.upper()} minus {ref.upper()}, seed-averaged predictions, "
+          f"{n_boot} resamples of the test set (negative = {model.upper()} better)")
+    rng = np.random.RandomState(SEED)
+    for split_name in a["split"].unique():
+        pa = a[a["split"] == split_name].groupby("cid").agg(y=("y_true", "first"), p=("y_pred", "mean"))
+        pb = b[b["split"] == split_name].groupby("cid")["y_pred"].mean().reindex(pa.index)
+        if pb.isna().any():
+            continue
+        ea, eb = np.abs(pa["p"].values - pa["y"].values), np.abs(pb.values - pa["y"].values)
+        idx = rng.randint(0, len(ea), size=(n_boot, len(ea)))
+        diff = ea[idx].mean(axis=1) - eb[idx].mean(axis=1)
+        lo, hi = np.percentile(diff, [2.5, 97.5])
+        verdict = "real" if (hi < 0 or lo > 0) else "NOT distinguishable from noise"
+        print(f"  {split_name:<9} {ea.mean() - eb.mean():+.3f}  95% interval [{lo:+.3f}, {hi:+.3f}]  -> {verdict}")
+
+
 def report(results, args, seconds):
     name = args.model.upper()
     line = "=" * 92
@@ -233,12 +265,22 @@ def report(results, args, seconds):
             for m in ["XGB tuned: Descriptors", "XGB tuned: Morgan + descriptors"]:
                 r = xgb[(xgb["split"] == split_name) & (xgb["model"] == m)].iloc[0]
                 print(f"  {m:<38}{r['MAE']:>9.3f}{r['RMSE']:>11.3f}{r['R2']:>9.3f}")
+        for other in ["gcn", "mpnn", "mpnn_nobond"]:
+            f = ROOT / "results" / f"gnn_{other}_results.csv"
+            if other != args.model and f.exists():
+                o = pd.read_csv(f)
+                om = o[(o["split"] == split_name) & (o["seed"] >= 0)]
+                if len(om):
+                    print(f"  {other.upper() + ' (mean of ' + str(len(om)) + ' seeds)':<38}{om['MAE'].mean():>9.3f}{om['RMSE'].mean():>11.3f}{om['R2'].mean():>9.3f}")
         print(f"  {name + ' (mean of ' + str(len(part)) + ' seeds)':<38}{part['MAE'].mean():>9.3f}{part['RMSE'].mean():>11.3f}{part['R2'].mean():>9.3f}")
         print(f"  {'   spread across seeds (std of MAE)':<38}{part['MAE'].std(ddof=0):>9.3f}")
         if len(ens):
             e = ens.iloc[0]
             print(f"  {name + ' (average of seeds, an ensemble)':<38}{e['MAE']:>9.3f}{e['RMSE']:>11.3f}{e['R2']:>9.3f}")
         print(f"  best epochs {part['best_epoch'].tolist()}  | mean seconds per seed {part['seconds'].mean():.0f}")
+    ref = REFERENCE.get(args.model)
+    if ref:
+        compare_to_reference(args.model, ref)
     print(f"\nsaved results/gnn_{args.model}_results.csv and gnn_{args.model}_predictions.csv")
     print(line)
 
